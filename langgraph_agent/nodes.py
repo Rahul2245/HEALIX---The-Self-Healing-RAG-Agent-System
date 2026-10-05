@@ -4,11 +4,17 @@ from typing import Any, TypedDict
 import streamlit as st
 from openai import OpenAI
 
-from langgraph_agent.retrieve_docs import embed_docs, get_doc_answer, llm_judge, rerank
+from langgraph_agent.retrieve_docs import (
+    embed_docs,
+    get_doc_answer,
+    llm_judge,
+    rerank,
+    validate_citations,
+)
 
 
 class RAGState(TypedDict, total=False):
-    text: list[str]
+    text: list[str | dict[str, Any]]
     query: str
     index: Any
     retrieved_docs: list[dict[str, Any]]
@@ -25,7 +31,9 @@ class RAGState(TypedDict, total=False):
 
 def retrieve_node(state: RAGState) -> dict:
     # The graph carries one index through all attempts; build only as a fallback.
-    index = state.get("index") or embed_docs(state.get("text", []))
+    index = state.get("index")
+    if index is None:
+        index = embed_docs(state.get("text", []))
     budget = min(state.get("retrieval_budget", 3), len(state.get("text", [])))
     results = get_doc_answer(index, state["query"], k=budget)
     if state.get("retrieval_mode") == "dense_rerank":
@@ -38,7 +46,9 @@ def generate_node(state: RAGState) -> dict:
         return {"answer": "I couldn't find readable or relevant evidence in the uploaded document."}
 
     evidence = "\n\n".join(
-        f'[{doc["chunk_id"]}] {doc["text"]}' for doc in state["retrieved_docs"]
+        f'[{doc["chunk_id"]} · page {doc["page"]}] {doc["text"]}'
+        if doc.get("page") else f'[{doc["chunk_id"]}] {doc["text"]}'
+        for doc in state["retrieved_docs"]
     )
     strict = state.get("failure_reason") == "unsupported_answer"
     system_prompt = (
@@ -70,6 +80,13 @@ def score_node(state: RAGState) -> dict:
         answer=state.get("answer", ""),
     )
     reason = evaluation["failure_reason"]
+    invalid_citations = validate_citations(
+        state.get("answer", ""), state.get("retrieved_docs", [])
+    )
+    evaluation["invalid_citations"] = invalid_citations
+    if invalid_citations:
+        evaluation["faithful"] = False
+        evaluation["failure_reason"] = reason = "unsupported_answer"
     st.caption(
         f"Judge score: {evaluation['score']:.2f} · "
         f"relevant: {evaluation['relevant_docs']} · "
@@ -77,6 +94,8 @@ def score_node(state: RAGState) -> dict:
         f"faithful: {evaluation['faithful']}"
     )
     st.caption(f"Failure reason: {reason}")
+    if invalid_citations:
+        st.caption(f"Invalid citations: {', '.join(invalid_citations)}")
     return {"score": evaluation["score"], "failure_reason": reason, "evaluation": evaluation}
 
 

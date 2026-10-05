@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from typing import Any
 
 from fastembed import TextEmbedding
@@ -17,13 +18,18 @@ COLLECTION_NAME = "documents"
 load_dotenv()
 
 
-def embed_docs(chunks: list[str]) -> QdrantClient:
+def embed_docs(chunks: list[str | dict[str, Any]]) -> QdrantClient:
     """Create an in-memory index once; pass the returned client through graph state."""
     if not chunks:
         raise ValueError("The uploaded document contains no readable text.")
 
+    normalized = [
+        chunk if isinstance(chunk, dict) else {"text": chunk, "page": None, "source": None}
+        for chunk in chunks
+    ]
+    texts = [chunk["text"] for chunk in normalized]
     model = TextEmbedding(model_name=EMBEDDING_MODEL)
-    vectors = list(model.embed(chunks))
+    vectors = list(model.embed(texts))
     client = QdrantClient(":memory:")
     client.create_collection(
         collection_name=COLLECTION_NAME,
@@ -37,9 +43,14 @@ def embed_docs(chunks: list[str]) -> QdrantClient:
             PointStruct(
                 id=i,
                 vector={"embedding": vector.tolist()},
-                payload={"chunk_id": f"C{i + 1}", "text": chunk},
+                payload={
+                    "chunk_id": f"C{i + 1}",
+                    "text": chunk["text"],
+                    "page": chunk.get("page"),
+                    "source": chunk.get("source"),
+                },
             )
-            for i, (chunk, vector) in enumerate(zip(chunks, vectors))
+            for i, (chunk, vector) in enumerate(zip(normalized, vectors))
         ],
     )
     return client
@@ -62,6 +73,8 @@ def get_doc_answer(docs: QdrantClient, query: str, k: int = 2) -> list[dict[str,
         {
             "chunk_id": point.payload["chunk_id"],
             "text": point.payload["text"],
+            "page": point.payload.get("page"),
+            "source": point.payload.get("source"),
             "score": float(point.score),
         }
         for point in result.points
@@ -94,7 +107,7 @@ Return only a JSON object with:
 {{"relevant_docs": true|false, "sufficient_context": true|false,
 "faithful": true|false, "score": 0.0, "failure_reason":
 "none"|"irrelevant_docs"|"missing_context"|"unsupported_answer"}}
-Score overall answer quality from 0 to 1. Mark unsupported_answer when the answer makes claims not supported by evidence.
+Score overall answer quality from 0 to 1. Verify cited chunk IDs exist in the evidence. Mark unsupported_answer when the answer makes claims not supported by evidence or uses invalid citations.
 """
 
 
@@ -114,25 +127,38 @@ def llm_judge(query: str, retrieved_docs: list[dict[str, Any]], answer: str) -> 
         ],
         temperature=0,
     )
-    raw = json.loads(response.choices[0].message.content or "{}")
-    reason = raw.get("failure_reason")
-    if reason not in {"none", "irrelevant_docs", "missing_context", "unsupported_answer"}:
-        if not raw.get("relevant_docs", False):
-            reason = "irrelevant_docs"
-        elif not raw.get("sufficient_context", False):
-            reason = "missing_context"
-        elif not raw.get("faithful", False):
-            reason = "unsupported_answer"
-        else:
-            reason = "none"
+    try:
+        raw = json.loads(response.choices[0].message.content or "{}")
+    except (json.JSONDecodeError, TypeError):
+        raw = {}
+    relevant = raw.get("relevant_docs") is True
+    sufficient = raw.get("sufficient_context") is True
+    faithful = raw.get("faithful") is True
+    # Derive the route from validated signals; an inconsistent reason must not
+    # suppress a failure reported by one of the evaluator's boolean checks.
+    if not relevant:
+        reason = "irrelevant_docs"
+    elif not sufficient:
+        reason = "missing_context"
+    elif not faithful:
+        reason = "unsupported_answer"
+    else:
+        reason = "none"
     try:
         score = max(0.0, min(1.0, float(raw.get("score", 0))))
     except (TypeError, ValueError):
         score = 0.0
     return {
-        "relevant_docs": bool(raw.get("relevant_docs", False)),
-        "sufficient_context": bool(raw.get("sufficient_context", False)),
-        "faithful": bool(raw.get("faithful", False)),
+        "relevant_docs": relevant,
+        "sufficient_context": sufficient,
+        "faithful": faithful,
         "score": score,
         "failure_reason": reason,
     }
+
+
+def validate_citations(answer: str, retrieved_docs: list[dict[str, Any]]) -> list[str]:
+    """Return citation IDs used by the answer but absent from retrieved evidence."""
+    cited = set(re.findall(r"\[(C\d+)\]", answer))
+    available = {doc["chunk_id"] for doc in retrieved_docs}
+    return sorted(cited - available)

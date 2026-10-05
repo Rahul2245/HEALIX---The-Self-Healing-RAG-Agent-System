@@ -87,27 +87,43 @@ if st.button('Search'):
 
         with st.spinner("Thinking..", show_time=True):
             st.write(":file_folder: | Log of execution:")
-            documents = load_document(temp_file)
+            try:
+                documents = load_document(temp_file)
+            except Exception as exc:
+                st.error(f"Could not read the PDF: {exc}")
+                documents = []
 
-            graph = build_graph()
-            result = graph.invoke({
-                "text": documents,
-                "query": question,
-                "retrieval_mode": "original",
-                "retrieval_budget": 2,
-                "retry_count": 0,
-                "max_retries": max_retries,
-                "healing_trace": [],
-                "retrieved_docs": [],
-                "answer": "",
-                "score": 0.0,
-                "failure_reason": "",
-            })
+            if documents:
+                graph = build_graph()
+                result = graph.invoke({
+                    "text": documents,
+                    "query": question,
+                    "retrieval_mode": "original",
+                    "retrieval_budget": 2,
+                    "retry_count": 0,
+                    "max_retries": max_retries,
+                    "healing_trace": [],
+                    "retrieved_docs": [],
+                    "answer": "",
+                    "score": 0.0,
+                    "failure_reason": "",
+                })
 
-            st.divider()
-            st.subheader("📖 Answer:")
-            st.write(result["answer"])
-            if result.get("healing_trace"):
-                st.subheader("🔧 Recovery attempts")
-                for step in result["healing_trace"]:
-                    st.write(f"- {step}")
+                st.divider()
+                st.subheader("📖 Answer:")
+                st.write(result["answer"])
+                if result.get("retrieved_docs"):
+                    with st.expander("Retrieved sources"):
+                        for doc in result["retrieved_docs"]:
+                            where = f" · page {doc['page']}" if doc.get("page") else ""
+                            st.markdown(
+                                f"**[{doc['chunk_id']}]{where}** · "
+                                f"retrieval score {doc['score']:.3f}"
+                            )
+                            st.caption(doc["text"])
+                if result.get("healing_trace"):
+                    st.subheader("🔧 Recovery attempts")
+                    for step in result["healing_trace"]:
+                        st.write(f"- {step}")
+            else:
+                st.error("The PDF did not contain any readable text.")

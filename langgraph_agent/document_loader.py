@@ -11,8 +11,7 @@ def load_document(pdf):
     :return: List of chunks of text
     """
 
-    loader = PyPDFLoader(pdf, 
-                         mode="single")
+    loader = PyPDFLoader(pdf, mode="page")
     docs = loader.load()
         
     # Instantiate Text Splitter with Chunk Size of 500 words and Overlap of 100 words so that context is not lost
@@ -20,11 +19,16 @@ def load_document(pdf):
     # Split into chunks for efficient retrieval
     chunks = text_splitter.split_documents(docs)
 
-    # Trasnform the chunks into a list of strings
-    chunks = [chunk.page_content for chunk in chunks]
-
-    # Return
-    return chunks
+    # Keep page metadata so generated citations can point back to the PDF.
+    return [
+        {
+            "text": chunk.page_content,
+            "page": chunk.metadata.get("page", 0) + 1,
+            "source": chunk.metadata.get("source", pdf),
+        }
+        for chunk in chunks
+        if chunk.page_content.strip()
+    ]
 
 
 
