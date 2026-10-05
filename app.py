@@ -2,9 +2,6 @@ import os
 import streamlit as st
 from langgraph_agent.graph import build_graph
 from langgraph_agent.document_loader import load_document
-from langgraph_agent.retrieve_docs import *
-from langgraph_agent.nodes import *
-from IPython.display import display, Image
 
 
 # Config page
@@ -16,6 +13,7 @@ st.set_page_config(page_title="Self-Healing RAG",
 
 # Add a place to enter the API key
 with st.sidebar:
+    max_retries = 2
     api_key = st.text_input("OPENAI_API_KEY", type="password")
 
     # Save the API key to the environment variable
@@ -48,8 +46,7 @@ with st.sidebar:
                                options=[1, 2, 3, 4, 5],
                                default=2)
 
-        # Message user that document is being processed with time emoji
-        st.spinner("Processing document... :watch:")
+        st.caption("Document ready for indexing when you search.")
 
     st.divider()
     # About
@@ -80,28 +77,37 @@ question = st.text_input(label="Ask me something from your document:",
 # Run the graph
 if st.button('Search'):
 
-    with st.spinner("Thinking..", show_time=True):
+    if not uploaded_file:
+        st.error("Upload a PDF before searching.")
+    elif not question.strip():
+        st.error("Enter a question before searching.")
+    elif not api_key:
+        st.error("Enter your OpenAI API key before searching.")
+    else:
 
-        # Log
-        st.write(":file_folder: | Log of execution:")
+        with st.spinner("Thinking..", show_time=True):
+            st.write(":file_folder: | Log of execution:")
+            documents = load_document(temp_file)
 
-        # Build the graph
-        # Load document and split it into chunks for efficient retrieval.
-        documents = load_document(temp_file)
+            graph = build_graph()
+            result = graph.invoke({
+                "text": documents,
+                "query": question,
+                "retrieval_mode": "original",
+                "retrieval_budget": 2,
+                "retry_count": 0,
+                "max_retries": max_retries,
+                "healing_trace": [],
+                "retrieved_docs": [],
+                "answer": "",
+                "score": 0.0,
+                "failure_reason": "",
+            })
 
-        graph = build_graph()
-        result = graph.invoke({
-            "text": documents,
-            "query": question,
-            "retrieval_mode": "original",
-            "retrieval_budget": 2,
-            "retry_count": 0,
-            "max_retries": max_retries,
-            "healing_trace":[]
-        })
-
-
-        # Print the result       
-        st.divider()
-        st.subheader("📖 Answer:")
-        st.write(result["answer"])
+            st.divider()
+            st.subheader("📖 Answer:")
+            st.write(result["answer"])
+            if result.get("healing_trace"):
+                st.subheader("🔧 Recovery attempts")
+                for step in result["healing_trace"]:
+                    st.write(f"- {step}")

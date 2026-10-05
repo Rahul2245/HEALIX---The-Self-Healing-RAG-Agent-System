@@ -21,7 +21,7 @@ def build_graph():
     builder.add_edge("retrieve", "generate")
     builder.add_edge("generate", "score")
     
-    # Conditional Edge: if score < 0.5 and retry_count < 3, then retry
+    # Retry only when the evaluator found a recoverable failure.
     builder.add_conditional_edges(
         "score", should_retry,
         {
@@ -51,6 +51,7 @@ if __name__ == "__main__":
     documents = load_document("./Guide_AB_Testing.pdf")
 
     graph.invoke({
+        "text": documents,
         "query": "What is an A/B Test?",
         "retrieved_docs": [],
         "retrieval_mode": "original",
@@ -58,7 +59,7 @@ if __name__ == "__main__":
         "failure_reason": "",
         "healing_trace": [],
         "answer": "",
-        "score": "",
-        "retry_count": 1,
+        "score": 0.0,
+        "retry_count": 0,
         "max_retries": 2
 })
