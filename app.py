@@ -139,12 +139,18 @@ def main() -> None:
     st.caption('Example: "Who is the author of this document?"')
     st.divider()
 
-    if not api_key:
+    if uploaded_file is not None and not api_key:
+        st.info(
+            "PDF uploaded. Enter your OpenAI API key in the sidebar before asking "
+            "a question about this document."
+        )
+    elif not api_key:
         st.warning("Please enter your OpenAI API key in the sidebar.")
 
     question = st.text_input(
         label="Ask me something from your document:",
         placeholder="e.g. What is the definition of A/B testing?",
+        disabled=uploaded_file is not None and not api_key,
     )
     if st.button("Search"):
         run_search(uploaded_file, temp_file, question, api_key, max_retries)
