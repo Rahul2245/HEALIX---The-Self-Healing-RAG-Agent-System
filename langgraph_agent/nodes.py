@@ -1,8 +1,6 @@
-import os
 from typing import Any, TypedDict
 
 import streamlit as st
-from openai import OpenAI
 
 from langgraph_agent.retrieve_docs import (
     embed_docs,
@@ -27,6 +25,7 @@ class RAGState(TypedDict, total=False):
     max_retries: int
     healing_trace: list[str]
     evaluation: dict[str, Any]
+    llm_config: dict[str, Any]
 
 
 def retrieve_node(state: RAGState) -> dict:
@@ -64,9 +63,12 @@ def generate_node(state: RAGState) -> dict:
     )
     if strict:
         system_prompt += " Be especially conservative: omit any claim that is not directly supported."
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    from langgraph_agent.retrieve_docs import create_llm_client
+
+    llm_config = state["llm_config"]
+    client = create_llm_client(llm_config)
     response = client.chat.completions.create(
-        model=os.getenv("RAG_GENERATION_MODEL", "gpt-4o-mini"),
+        model=llm_config["generation_model"],
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Evidence:\n{evidence}\n\nQuestion: {state['query']}"},
@@ -85,6 +87,7 @@ def score_node(state: RAGState) -> dict:
         query=state["query"],
         retrieved_docs=state.get("retrieved_docs", []),
         answer=state.get("answer", ""),
+        llm_config=state["llm_config"],
     )
     reason = evaluation["failure_reason"]
     invalid_citations = validate_citations(

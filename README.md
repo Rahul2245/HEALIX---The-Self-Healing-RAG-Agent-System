@@ -91,8 +91,8 @@ Self-Healing-RAG/
 * Qdrant – vector database
 * FastEmbed – Hugging Face embeddings
 * Cross-Encoder Reranker – relevance refinement
-* OpenAI GPT-4o – answer generation
-* OpenAI GPT-3.5 – LLM-as-a-Judge
+* Any OpenAI-compatible chat API – answer generation and LLM-as-a-Judge
+* Ollama – local open source chat models, with no hosted LLM key required
 * Streamlit – UI
 
 ### Dependencies
@@ -105,7 +105,7 @@ Self-Healing-RAG/
 * `langchain-text-splitters` >= 1.1.0
 * `langgraph` >= 1.0.5
 * `numpy` >= 2.4.0
-* `openai` >= 2.14.0
+* `openai` >= 2.14.0 (used as the client for OpenAI-compatible APIs, including Ollama)
 * `pypdf` >= 6.5.0
 * `qdrant-client` >= 1.16.2
 * `sentence-transformers` >= 5.2.0
@@ -155,15 +155,29 @@ This explicit state design makes the system:
 * explainable
 * extensible
 
+## 🔌 Model providers
+
+The model provider, endpoint, API key, and model names are configured in the Streamlit sidebar. The app uses the OpenAI chat completions API format, which is supported by OpenAI and many hosted inference providers. Choose **OpenAI-compatible API** and enter the provider's compatible base URL, key, and model ID. Generation and judge model IDs can be different.
+
+For local open source models, install [Ollama](https://ollama.com), start its service, and pull a model, for example:
+
+```bash
+ollama pull llama3.2
+```
+
+Then choose **Ollama** in the sidebar. The default endpoint is `http://localhost:11434/v1`; enter the model name exactly as shown by `ollama list`. Ollama does not require an API key. You can use the same model for generation and judging or select a separate model for each.
+
+This supports OpenAI-compatible endpoints. Providers that only expose a different, non-compatible API protocol need an adapter before they can be used.
+
 ## ▶️ Running the App
 
 ### 1️⃣ Install dependencies
 
 ```bash
-pip install -r requirements.txt
+pip install -e .
 ```
 
-(Ensure you have qdrant-client, fastembed, langgraph, streamlit, and openai installed.)
+This installs the dependencies declared in `pyproject.toml`. The embedding and reranking models are downloaded from Hugging Face on first use.
 
 ### 2️⃣ Run Streamlit
 
@@ -173,7 +187,7 @@ streamlit run app.py
 
 ### 3️⃣ Usage
 
-1. Enter your OpenAI API key
+1. Choose OpenAI, Ollama, or an OpenAI-compatible API and configure its model(s)
 2. Upload a PDF document
 3. Ask questions about the document
 4. Watch the agent:

@@ -1,11 +1,9 @@
 """Indexing, retrieval, reranking, and answer evaluation helpers."""
 
 import json
-import os
 import re
 from typing import Any
 
-from dotenv import load_dotenv
 from fastembed import TextEmbedding
 from fastembed.rerank.cross_encoder import TextCrossEncoder
 from openai import OpenAI
@@ -15,7 +13,16 @@ from qdrant_client.models import Distance, PointStruct, VectorParams
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 RERANKER_MODEL = "jinaai/jina-reranker-v2-base-multilingual"
 COLLECTION_NAME = "documents"
-load_dotenv()
+
+
+def create_llm_client(config: dict[str, Any]) -> OpenAI:
+    """Create an OpenAI-compatible client for hosted APIs or local Ollama."""
+    api_key = config.get("api_key") or "ollama"
+    options: dict[str, Any] = {"api_key": api_key}
+    base_url = (config.get("base_url") or "").strip()
+    if base_url:
+        options["base_url"] = base_url
+    return OpenAI(**options)
 
 
 def embed_docs(chunks: list[str | dict[str, Any]]) -> QdrantClient:
@@ -120,12 +127,16 @@ Score overall answer quality from 0 to 1. Verify cited chunk IDs exist in the ev
 """
 
 
-def llm_judge(query: str, retrieved_docs: list[dict[str, Any]], answer: str) -> dict[str, Any]:
+def llm_judge(
+    query: str,
+    retrieved_docs: list[dict[str, Any]],
+    answer: str,
+    llm_config: dict[str, Any],
+) -> dict[str, Any]:
     """Evaluate grounding; return validated fields with a safe failure fallback."""
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    client = create_llm_client(llm_config)
     response = client.chat.completions.create(
-        model=os.getenv("RAG_JUDGE_MODEL", "gpt-4o-mini"),
-        response_format={"type": "json_object"},
+        model=llm_config["judge_model"],
         messages=[
             {
                 "role": "system",
@@ -143,7 +154,9 @@ def llm_judge(query: str, retrieved_docs: list[dict[str, Any]], answer: str) -> 
         temperature=0,
     )
     try:
-        raw = json.loads(response.choices[0].message.content or "{}")
+        content = response.choices[0].message.content or "{}"
+        content = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", content, flags=re.I)
+        raw = json.loads(content)
     except (json.JSONDecodeError, TypeError):
         raw = {}
     relevant = raw.get("relevant_docs") is True

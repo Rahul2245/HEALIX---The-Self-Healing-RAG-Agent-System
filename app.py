@@ -8,22 +8,49 @@ from langgraph_agent.document_loader import load_document
 from langgraph_agent.graph import build_graph
 
 
-def render_sidebar() -> tuple[object, str | None, str, int]:
-    """Render controls and return the uploaded file, temporary path, and retry limit."""
+def render_sidebar() -> tuple[object, str | None, dict[str, str], int]:
+    """Render provider controls and return upload, LLM settings, and retry limit."""
     with st.sidebar:
         if st.button("Clear"):
-            os.environ.pop("OPENAI_API_KEY", None)
-            st.session_state.pop("openai_api_key", None)
+            for key in list(st.session_state):
+                if key == "provider" or key.startswith(
+                    ("api_key_", "base_url_", "generation_model_", "judge_model_")
+                ):
+                    st.session_state.pop(key, None)
             st.rerun()
 
-        api_key = st.text_input(
-            "OPENAI_API_KEY",
-            value=os.environ.get("OPENAI_API_KEY", ""),
-            type="password",
-            key="openai_api_key",
+        provider = st.selectbox(
+            "Model provider",
+            options=["OpenAI", "Ollama", "OpenAI-compatible API"],
+            key="provider",
+            help="Hosted providers use their API key and compatible endpoint. Ollama runs locally.",
         )
-        if api_key:
-            os.environ["OPENAI_API_KEY"] = api_key
+        defaults = {
+            "OpenAI": ("https://api.openai.com/v1", "gpt-4o-mini"),
+            "Ollama": ("http://localhost:11434/v1", "llama3.2"),
+            "OpenAI-compatible API": ("", ""),
+        }
+        default_url, default_model = defaults[provider]
+        base_url = st.text_input(
+            "API base URL",
+            value=default_url,
+            key=f"base_url_{provider}",
+            help="For Ollama, use http://localhost:11434/v1. Use the API's OpenAI-compatible base URL otherwise.",
+        )
+        api_key = st.text_input(
+            "API key (leave blank for local Ollama)",
+            value=os.environ.get("OPENAI_API_KEY", "") if provider == "OpenAI" else "",
+            type="password",
+            key=f"api_key_{provider}",
+        )
+        generation_model = st.text_input(
+            "Generation model", value=default_model, key=f"generation_model_{provider}"
+        )
+        judge_model = st.text_input(
+            "Judge model (can match generation model)",
+            value=default_model,
+            key=f"judge_model_{provider}",
+        )
 
         st.divider()
         uploaded_file = st.file_uploader("Upload a PDF file", type="pdf")
@@ -44,7 +71,13 @@ def render_sidebar() -> tuple[object, str | None, str, int]:
         st.divider()
         st.write("Designed with :heart: by [Gustavo R. Santos](https://gustavorsantos.me)")
 
-    return uploaded_file, temp_file, api_key, max_retries
+    return uploaded_file, temp_file, {
+        "base_url": base_url.strip(),
+        "api_key": api_key.strip(),
+        "provider": provider,
+        "generation_model": generation_model.strip(),
+        "judge_model": judge_model.strip(),
+    }, max_retries
 
 
 def render_sources(documents: list[dict]) -> None:
@@ -66,7 +99,7 @@ def run_search(
     uploaded_file: object,
     temp_file: str | None,
     question: str,
-    api_key: str,
+    llm_config: dict[str, str],
     max_retries: int,
 ) -> None:
     """Validate inputs, invoke the graph, and display the result."""
@@ -76,8 +109,11 @@ def run_search(
     if not question.strip():
         st.error("Enter a question before searching.")
         return
-    if not api_key:
-        st.error("Enter your OpenAI API key before searching.")
+    if not llm_config["api_key"] and llm_config["provider"] != "Ollama":
+        st.error("Enter an API key, or configure a local Ollama endpoint.")
+        return
+    if not llm_config["generation_model"] or not llm_config["judge_model"]:
+        st.error("Enter both a generation model and a judge model.")
         return
 
     with st.spinner("Thinking...", show_time=True):
@@ -105,6 +141,7 @@ def run_search(
                 "answer": "",
                 "score": 0.0,
                 "failure_reason": "",
+                "llm_config": llm_config,
             }
         )
 
@@ -128,7 +165,7 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
 
-    uploaded_file, temp_file, api_key, max_retries = render_sidebar()
+    uploaded_file, temp_file, llm_config, max_retries = render_sidebar()
 
     st.title("Self-Healing RAG Agent | 🤖")
     st.markdown("Ask questions about the contents of your uploaded PDF.")
@@ -139,21 +176,22 @@ def main() -> None:
     st.caption('Example: "Who is the author of this document?"')
     st.divider()
 
-    if uploaded_file is not None and not api_key:
+    configured = bool(llm_config["api_key"] or llm_config["provider"] == "Ollama")
+    if uploaded_file is not None and not configured:
         st.info(
-            "PDF uploaded. Enter your OpenAI API key in the sidebar before asking "
+            "PDF uploaded. Configure your provider and API key in the sidebar before asking "
             "a question about this document."
         )
-    elif not api_key:
-        st.warning("Please enter your OpenAI API key in the sidebar.")
+    elif not configured:
+        st.warning("Configure an API provider or local Ollama in the sidebar.")
 
     question = st.text_input(
         label="Ask me something from your document:",
         placeholder="e.g. What is the definition of A/B testing?",
-        disabled=uploaded_file is not None and not api_key,
+        disabled=uploaded_file is not None and not configured,
     )
     if st.button("Search"):
-        run_search(uploaded_file, temp_file, question, api_key, max_retries)
+        run_search(uploaded_file, temp_file, question, llm_config, max_retries)
 
 
 if __name__ == "__main__":

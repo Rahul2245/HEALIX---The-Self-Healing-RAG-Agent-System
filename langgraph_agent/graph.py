@@ -1,5 +1,7 @@
 """LangGraph construction and optional local graph preview."""
 
+import os
+
 from langgraph.graph import END, StateGraph
 
 from langgraph_agent.document_loader import load_document
@@ -57,6 +59,12 @@ def main() -> None:
             "score": 0.0,
             "retry_count": 0,
             "max_retries": 2,
+            "llm_config": {
+                "base_url": "https://api.openai.com/v1",
+                "api_key": os.environ.get("OPENAI_API_KEY", ""),
+                "generation_model": "gpt-4o-mini",
+                "judge_model": "gpt-4o-mini",
+            },
         }
     )
 
