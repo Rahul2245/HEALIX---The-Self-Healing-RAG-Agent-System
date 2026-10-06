@@ -43,11 +43,16 @@ def retrieve_node(state: RAGState) -> dict:
 
 def generate_node(state: RAGState) -> dict:
     if not state.get("retrieved_docs"):
-        return {"answer": "I couldn't find readable or relevant evidence in the uploaded document."}
+        return {
+            "answer": "I couldn't find readable or relevant evidence in the uploaded document."
+        }
 
     evidence = "\n\n".join(
-        f'[{doc["chunk_id"]} · page {doc["page"]}] {doc["text"]}'
-        if doc.get("page") else f'[{doc["chunk_id"]}] {doc["text"]}'
+        (
+            f'[{doc["chunk_id"]} · page {doc["page"]}] {doc["text"]}'
+            if doc.get("page")
+            else f'[{doc["chunk_id"]}] {doc["text"]}'
+        )
         for doc in state["retrieved_docs"]
     )
     strict = state.get("failure_reason") == "unsupported_answer"
@@ -68,7 +73,9 @@ def generate_node(state: RAGState) -> dict:
         ],
         temperature=0,
     )
-    answer = response.choices[0].message.content or "I couldn't generate an answer from the evidence."
+    answer = response.choices[0].message.content or (
+        "I couldn't generate an answer from the evidence."
+    )
     st.caption("Answer generated from retrieved evidence.")
     return {"answer": answer}
 
@@ -96,7 +103,11 @@ def score_node(state: RAGState) -> dict:
     st.caption(f"Failure reason: {reason}")
     if invalid_citations:
         st.caption(f"Invalid citations: {', '.join(invalid_citations)}")
-    return {"score": evaluation["score"], "failure_reason": reason, "evaluation": evaluation}
+    return {
+        "score": evaluation["score"],
+        "failure_reason": reason,
+        "evaluation": evaluation,
+    }
 
 
 def should_retry(state: RAGState) -> str:
@@ -118,9 +129,15 @@ def retry_node(state: RAGState) -> dict:
     chunk_count = len(state.get("text", []))
     next_budget = min(max(current_budget + 2, current_budget), chunk_count)
     if reason == "irrelevant_docs":
-        action = f"Irrelevant evidence: rerank candidates and expand retrieval to {next_budget} chunks."
+        action = (
+            f"Irrelevant evidence: rerank candidates and expand retrieval "
+            f"to {next_budget} chunks."
+        )
     elif reason == "missing_context":
-        action = f"Incomplete evidence: expand retrieval to {next_budget} chunks and rerank."
+        action = (
+            f"Incomplete evidence: expand retrieval to {next_budget} chunks "
+            "and rerank."
+        )
     elif reason == "unsupported_answer":
         action = "Unsupported answer: regenerate conservatively with explicit evidence citations."
         # Give grounding regeneration one chance without changing retrieval depth.

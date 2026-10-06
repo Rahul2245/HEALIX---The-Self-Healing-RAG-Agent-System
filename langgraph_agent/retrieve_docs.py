@@ -5,9 +5,9 @@ import os
 import re
 from typing import Any
 
+from dotenv import load_dotenv
 from fastembed import TextEmbedding
 from fastembed.rerank.cross_encoder import TextCrossEncoder
-from dotenv import load_dotenv
 from openai import OpenAI
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
@@ -24,7 +24,9 @@ def embed_docs(chunks: list[str | dict[str, Any]]) -> QdrantClient:
         raise ValueError("The uploaded document contains no readable text.")
 
     normalized = [
-        chunk if isinstance(chunk, dict) else {"text": chunk, "page": None, "source": None}
+        chunk
+        if isinstance(chunk, dict)
+        else {"text": chunk, "page": None, "source": None}
         for chunk in chunks
     ]
     texts = [chunk["text"] for chunk in normalized]
@@ -56,7 +58,11 @@ def embed_docs(chunks: list[str | dict[str, Any]]) -> QdrantClient:
     return client
 
 
-def get_doc_answer(docs: QdrantClient, query: str, k: int = 2) -> list[dict[str, Any]]:
+def get_doc_answer(
+    docs: QdrantClient,
+    query: str,
+    k: int = 2,
+) -> list[dict[str, Any]]:
     """Return ranked chunks with stable citation IDs and retrieval scores."""
     if not query.strip() or k <= 0:
         return []
@@ -81,7 +87,10 @@ def get_doc_answer(docs: QdrantClient, query: str, k: int = 2) -> list[dict[str,
     ]
 
 
-def rerank(query: str, retrieved_docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def rerank(
+    query: str,
+    retrieved_docs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Rerank candidates while keeping their IDs and metadata intact."""
     if len(retrieved_docs) < 2:
         return retrieved_docs
@@ -118,12 +127,18 @@ def llm_judge(query: str, retrieved_docs: list[dict[str, Any]], answer: str) -> 
         model=os.getenv("RAG_JUDGE_MODEL", "gpt-4o-mini"),
         response_format={"type": "json_object"},
         messages=[
-            {"role": "system", "content": "You are a strict RAG answer evaluator. Return valid JSON."},
-            {"role": "user", "content": JUDGE_PROMPT.format(
-                query=query,
-                retrieved_docs=json.dumps(retrieved_docs, ensure_ascii=False),
-                answer=answer,
-            )},
+            {
+                "role": "system",
+                "content": "You are a strict RAG answer evaluator. Return valid JSON.",
+            },
+            {
+                "role": "user",
+                "content": JUDGE_PROMPT.format(
+                    query=query,
+                    retrieved_docs=json.dumps(retrieved_docs, ensure_ascii=False),
+                    answer=answer,
+                ),
+            },
         ],
         temperature=0,
     )
@@ -157,7 +172,10 @@ def llm_judge(query: str, retrieved_docs: list[dict[str, Any]], answer: str) -> 
     }
 
 
-def validate_citations(answer: str, retrieved_docs: list[dict[str, Any]]) -> list[str]:
+def validate_citations(
+    answer: str,
+    retrieved_docs: list[dict[str, Any]],
+) -> list[str]:
     """Return citation IDs used by the answer but absent from retrieved evidence."""
     cited = set(re.findall(r"\[(C\d+)\]", answer))
     available = {doc["chunk_id"] for doc in retrieved_docs}
